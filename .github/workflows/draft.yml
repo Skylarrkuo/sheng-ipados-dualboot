@@ -1,0 +1,59 @@
+name: Draft validated dual-boot images
+on:
+  workflow_dispatch:
+    inputs:
+      boot_run:
+        description: Successful boot image workflow run ID
+        required: true
+        type: string
+      root_run:
+        description: Workflow run containing the verified linux root image
+        required: true
+        type: string
+        default: '45126553170'
+
+permissions:
+  contents: write
+  actions: read
+concurrency:
+  group: draft-sheng-24A446-${{ inputs.boot_run }}
+  cancel-in-progress: false
+
+jobs:
+  draft:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      BOOT_RUN: ${{ inputs.boot_run }}
+      ROOT_RUN: ${{ inputs.root_run }}
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+      - name: Require completed image jobs from this repository
+        run: python3 draft_release.py check-runs
+      - uses: actions/download-artifact@v8.0.2
+        with:
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.boot_run }}
+          name: sheng-24A446-boot
+          path: dist/release-boot
+          digest-mismatch: error
+      - uses: actions/download-artifact@v8.0.2
+        with:
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.root_run }}
+          name: sheng-24A446-linux-root
+          path: dist/release-root
+          digest-mismatch: error
+      - name: Verify the boot slot, Data, root files and full decompressed root SHA-256
+        shell: bash
+        run: |
+          python3 draft_release.py verify
+          cd dist/release-root
+          cat linux-root.img.zst.??? | zstd -dc | sha256sum > "$RUNNER_TEMP/raw-root.sha256"
+          test "$(cut -d' ' -f1 "$RUNNER_TEMP/raw-root.sha256")" = "$(jq -r .image_sha256 linux-root.json)"
+      - name: Upload and check every draft asset
+        run: python3 draft_release.py upload
