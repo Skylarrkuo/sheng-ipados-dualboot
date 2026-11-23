@@ -1,5 +1,6 @@
 /src/
 /.tools/
 /dist/
+/.checkpoints/
 __pycache__/
 *.pyc

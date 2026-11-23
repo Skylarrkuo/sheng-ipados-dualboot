@@ -5,7 +5,7 @@ project=$PWD
 mode=${1:?Choose root or boot}
 profile=$(python3 -c 'from configure import DEVICE; print(DEVICE["profile"])')
 target="$project/src/UniXNU/out/sheng/$profile/sheng_ipados27"
-output="$project/dist/$mode"
+output="$project/dist/${mode#export-}"
 mkdir -p "$output"
 case "$mode" in
   root)
@@ -32,12 +32,15 @@ case "$mode" in
     python3 src/UniXNU-sheng/scripts/extract-files.py
     python3 prepare_wifi.py
     (cd src/UniXNU-sheng && bash scripts/package.sh --os "$profile" --uefi "$project/src/uefi-sheng" --init-data)
-    python3 verify_boot.py
-    cp "$target/boot/boot.img" "$target/package.manifest.json" "$target/target-audit.json" "$target/runtime/data.dbr" "$output/"
     ;;
+  export-boot) ;;
   *) echo 'Choose root or boot' >&2; exit 2 ;;
 esac
 case "$mode" in
   root) (cd "$output" && shasum -a 256 linux-root.json linux-root.img.zst.* > SHA256SUMS) ;;
-  boot) (cd "$output" && shasum -a 256 boot.img data.dbr package.manifest.json target-audit.json > SHA256SUMS) ;;
+  boot|export-boot)
+    python3 verify_boot.py
+    cp "$target/boot/boot.img" "$target/package.manifest.json" "$target/target-audit.json" "$target/runtime/data.dbr" "$output/"
+    (cd "$output" && shasum -a 256 boot.img data.dbr package.manifest.json target-audit.json > SHA256SUMS)
+    ;;
 esac

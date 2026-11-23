@@ -36,6 +36,8 @@ def checkout(minimal=False):
             git(path, "submodule", "update", "--init", "--recursive", "--depth", "1", "--jobs", "8")
     if minimal:
         git(BOARD, "submodule", "update", "--init", "--depth", "1", "drivers/ShengUfs")
+        git(CORE, "submodule", "update", "--init", "--depth", "1",
+            "drivers/Adreno740", "drivers/RamBlock", "drivers/GopFramebuffer")
 
 
 def edit(path, replacements):
@@ -143,6 +145,10 @@ def configure():
         ("bool lidArmed() {", desktop_guard + "bool lidArmed() {"),
         (desktop_guard + "IOReturn sleepWake(", "/* macOS root-domain notification */\nIOReturn sleepWake("),
     ])
+    from kernel_port import configure_drivers
+    configure_drivers(CORE, BOARD, edit)
+    from ci_overlay import configure_ci
+    configure_ci(CORE, edit)
     # Apply after the two official translator patches, through the upstream tree-identity check.
     # The existing Mach implementation operates only on the calling task and checks the returned size.
     shutil.copyfile(HERE / "patches/metal2vulkan-ios.patch", CORE / "scripts/data/metal2vulkan-ios.patch")

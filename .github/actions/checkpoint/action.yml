@@ -1,0 +1,45 @@
+name: Reuse a completed sheng build stage
+description: Save each successful stage before running the next one
+inputs:
+  stage:
+    description: Build stage
+    required: true
+runs:
+  using: composite
+  steps:
+    - id: inputs
+      shell: bash
+      env:
+        STAGE: ${{ inputs.stage }}
+      run: |
+        echo "start=$(date +%s)" >> "$GITHUB_OUTPUT"
+        python3 ci_build.py key "$STAGE"
+    - uses: actions/cache/restore@v6.1.0
+      id: cache
+      with:
+        path: .checkpoints/${{ inputs.stage }}
+        key: ${{ steps.inputs.outputs.key }}
+    - shell: bash
+      env:
+        STAGE: ${{ inputs.stage }}
+        KEY: ${{ steps.inputs.outputs.key }}
+        HIT: ${{ steps.cache.outputs.cache-hit }}
+      run: |
+        mode=build
+        if [[ "$HIT" == true ]]; then mode=restore; fi
+        python3 ci_build.py "$mode" "$STAGE" --key "$KEY"
+    - if: steps.cache.outputs.cache-hit != 'true'
+      uses: actions/cache/save@v6.1.0
+      with:
+        path: .checkpoints/${{ inputs.stage }}
+        key: ${{ steps.inputs.outputs.key }}
+    - shell: bash
+      env:
+        STAGE: ${{ inputs.stage }}
+        HIT: ${{ steps.cache.outputs.cache-hit }}
+        START: ${{ steps.inputs.outputs.start }}
+      run: |
+        result='built'
+        if [[ "$HIT" == true ]]; then result='restored and verified'; fi
+        printf '| %s | %s | %ds |\n' "$STAGE" "$result" "$(( $(date +%s) - START ))" >> "$GITHUB_STEP_SUMMARY"
+        python3 -c 'import os,pathlib; (pathlib.Path(".checkpoints")/os.environ["STAGE"]/"outputs.tar.zst").unlink()'

@@ -8,10 +8,33 @@ from pathlib import Path
 from unittest.mock import patch
 
 from audit_target import check_inputs, context, verify_profile
-from configure import BOARD
+from configure import BOARD, CORE
 
 
 class TargetTests(unittest.TestCase):
+    @unittest.skipUnless(shutil.which("c++"), "C++ preprocessor required")
+    def test_ipados_link_inputs(self):
+        targets = {
+            BOARD / "package/BootLog.c": ["cs_native4k_" + suffix for suffix in
+                                          ("chunk_ticks", "digest_bytes", "digest_cpu", "digest_wall", "record_ticks")],
+            BOARD / "package/LegacyDisplayProbe.cpp": ["sheng_ethernet_probe", "sheng_software_aes_probe"],
+            CORE / "drivers/Adreno740/NativeAdrenoPublish.cpp": ["iokit_physical_descriptor_close_notify"],
+            CORE / "drivers/RamBlock/NativeRamBlock.cpp": ["ml_static_mfree_prepare"],
+        }
+        platform = ["c++", "-E", "-P", "-x", "c++", "-DXNU_TARGET_OS_IOS=1", "-DXNU_TARGET_OS_OSX=0",
+                    "-D__has_feature(x)=0", "-"]
+        for path, names in targets.items():
+            source = re.sub(r"^\s*#\s*include\b[^\n]*", "", path.read_text(), flags=re.M)
+            code = subprocess.check_output(platform, input=source, text=True)
+            for name in names:
+                uses = [line for line in code.splitlines() if re.search(rf"\b{name}\b", line)
+                        and "extern " not in line and "weak_import" not in line]
+                self.assertEqual(uses, [], name)
+        display = CORE / "drivers/GopFramebuffer/NativeLegacyDisplay.cpp"
+        source = re.sub(r"^\s*#\s*include\b[^\n]*", "", display.read_text(), flags=re.M)
+        code = subprocess.check_output(platform, input=source, text=True)
+        self.assertEqual(code.count("native_legacy_request_layout[6]={kRequestRect0"), 1)
+
     def test_external_inputs(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

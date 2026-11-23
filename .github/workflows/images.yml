@@ -5,8 +5,12 @@ on:
       stage:
         description: Build stage
         type: choice
-        options: [both, root, boot]
-        default: both
+        options: [boot, both, root]
+        default: boot
+      data_generation:
+        description: First-install Data seed cache group
+        type: string
+        default: sheng-development-1
   push:
     tags: ['build-*']
 
@@ -61,16 +65,20 @@ jobs:
     env:
       HOMEBREW_NO_AUTO_UPDATE: '1'
       UNIXNU_IPSW_JOBS: '12'
+      UNIXNU_UNIQUE_CHIP_ID: '53483653'
+      DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
+      SHENG_DATA_GENERATION: ${{ inputs.data_generation || 'sheng-development-1' }}
     steps:
       - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
       - uses: actions/setup-python@v6
         with:
           python-version: '3.14'
       - name: Apple and UEFI build tools
         run: |
-          export DEVELOPER_DIR=/Applications/Xcode_26.6.app/Contents/Developer
           xcodebuild -version
-          brew install dtc llvm lld llvm@22 lld@22 cmake mtools ninja glslang shaderc spirv-tools bison pkgconf rustup unifdef openssl@3 blacktop/tap/ipsw
+          brew install dtc llvm lld llvm@22 lld@22 cmake mtools ninja glslang shaderc spirv-tools bison pkgconf rustup unifdef openssl@3 zstd blacktop/tap/ipsw
           rustup toolchain install 1.98.0 --profile minimal --component rust-src
           mkdir -p "$RUNNER_TEMP/edk2-llvm"
           for tool in clang llvm-lib llvm-rc; do ln -s "$(brew --prefix llvm@22)/bin/$tool" "$RUNNER_TEMP/edk2-llvm/$tool"; done
@@ -78,10 +86,52 @@ jobs:
           echo "CLANG_BIN=$RUNNER_TEMP/edk2-llvm/" >> "$GITHUB_ENV"
           echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
           echo "$(brew --prefix bison)/bin" >> "$GITHUB_PATH"
-      - name: Build kernel, firmware, Data and boot image
+      - name: Prepare pinned iPadOS inputs
         env:
           GITHUB_TOKEN: ${{ github.token }}
-        run: bash build.sh boot
+        run: |
+          python3 configure.py --fetch
+          python3 audit_target.py
+          python3 src/UniXNU-sheng/scripts/extract-files.py
+          python3 ci_build.py prepare
+          printf '| Stage | Result | Time |\n|---|---|---:|\n' >> "$GITHUB_STEP_SUMMARY"
+      - name: Adreno Metal and Turnip
+        uses: ./.github/actions/checkpoint
+        with: {stage: gpu}
+      - name: iPadOS runtime and Data
+        uses: ./.github/actions/checkpoint
+        with: {stage: runtime}
+      - name: XNU objects and device driver archives
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        uses: ./.github/actions/checkpoint
+        with: {stage: archives}
+      - name: RELEASE LTO reference
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        uses: ./.github/actions/checkpoint
+        with: {stage: reference}
+      - name: Link DEVELOPMENT kernel
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        uses: ./.github/actions/checkpoint
+        with: {stage: link}
+      - name: Prelink iPadOS kernel
+        uses: ./.github/actions/checkpoint
+        with: {stage: prelink}
+      - name: Build UniXNU EFI package
+        uses: ./.github/actions/checkpoint
+        with: {stage: package}
+      - name: Assemble payload
+        uses: ./.github/actions/checkpoint
+        with: {stage: payload}
+      - name: Build sheng UEFI firmware
+        uses: ./.github/actions/checkpoint
+        with: {stage: firmware}
+      - name: Pack boot image and verify release
+        run: |
+          python3 ci_build.py finish
+          bash build.sh export-boot
       - uses: actions/upload-artifact@v7.0.2
         with:
           name: sheng-24A446-boot

@@ -13,6 +13,10 @@ gh run watch RUN_ID --exit-status
 gh run download RUN_ID --dir images
 ```
 
+手动运行默认只构建 `boot`。GPU、运行时与 Data、XNU 对象与驱动、RELEASE LTO 参考内核、DEVELOPMENT 链接、预链接、EFI 包、payload 和 UEFI 固件分别保存缓存。每项成功就上传，后续阶段失败也可复用。Actions 摘要逐项显示实际编译或恢复及耗时。恢复时核对目标、输入和缓存包 SHA-256，打包后仍执行镜像校验。工具链或该阶段输入变化会重新编译。
+
+相同 `data_generation` 在运行时缓存命中时沿用同一份首装种子。缓存缺失时，本工作流的首装模式会生成新种子，并按新种子的 SHA-256 和卷 UUID 重新选择内核缓存。给已经安装的设备做升级时须保留并使用原始 `data.dbr`。GitHub 可以回收构建缓存，安装种子应与发布产物一起另存。
+
 本地 Apple Silicon Mac 可使用与 `.github/workflows/images.yml` 相同的 Xcode 26.6 和依赖，分别运行 `bash build.sh root` 和 `bash build.sh boot`。源码版本、分区容量和 Data 逻辑大小记录在 [build.toml](build.toml)。公开构建使用固定的测试平台身份。首次安装生成新的 iPadOS Data 种子，同一安装后续维护应保存原始 `data.dbr`、启动镜像和清单。该流程没有设置 macOS 管理员账号或预置 iPad 解锁密码。
 
 ## 分区与镜像
