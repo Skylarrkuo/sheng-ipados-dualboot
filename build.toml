@@ -1,0 +1,12 @@
+[source]
+UniXNU = "8542980d02b4d2cc5c32ee3542de1760b2562aac"
+UniXNU-sheng = "c8f92b208068eeaa4cd2b0f592671f04ee70076e"
+uefi-sheng = "b303410c8e401fc9419ae65a024356ed09a438ef"
+
+[device]
+profile = "ipados-27.0.1-24A446"
+partition = "linux"
+capacity_bytes = 124748038144
+boot_b_bytes = 201326592
+data_gib = 80
+log_reserve_mib = 1024
