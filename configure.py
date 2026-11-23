@@ -1,5 +1,6 @@
 """Prepare dedicated upstream checkouts for the sheng second-system build."""
 import argparse
+import shutil
 import subprocess
 import tomllib
 from pathlib import Path
@@ -89,6 +90,13 @@ def configure():
     edit(SRC / "uefi-sheng/Platforms/Xiaomi/shengPkg/Library/MemoryMapLib/MemoryMapLib.c",
          [('{"DRAM bank 1 low", 0x880000000, 0x3B300000,',
            '{"DRAM bank 1 low", 0x880000000, 0x39D00000,')])
+    # Apply after the two official translator patches, through the upstream tree-identity check.
+    # The existing Mach implementation operates only on the calling task and checks the returned size.
+    shutil.copyfile(HERE / "patches/metal2vulkan-ios.patch", CORE / "scripts/data/metal2vulkan-ios.patch")
+    edit(CORE / "scripts/build-adreno-metal-bridge.py", [
+        ("'0064-copies-leave-unreachable-pages-alone.patch']]",
+         "'0064-copies-leave-unreachable-pages-alone.patch']]\n"
+         "PATCHES.append(ROOT / 'scripts/data/metal2vulkan-ios.patch')")])
 
 
 if __name__ == "__main__":
