@@ -1,9 +1,15 @@
 """Expose checkpoint boundaries in the pinned UniXNU recipes. Local release uses all phases."""
+from pathlib import Path
+import shutil
+
+
+REVIEWED_SYMBOLS = Path(__file__).resolve().parent / "patches/fileset-24A446-sheng-symbols.json"
 
 
 def configure_ci(core, edit):
     layout = core / "kits/XnuPrelink/fileset_layout.py"
     if layout.is_file():  # The root-only checkout omits the prelink kit.
+        shutil.copyfile(REVIEWED_SYMBOLS, layout.parent / "fixtures" / REVIEWED_SYMBOLS.name)
         edit(layout, [
             ("raise ValueError('Native code would collide with collection data')",
              "raise ValueError(f'Native code end {code_end:#x} exceeds collection data at '"

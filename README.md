@@ -42,7 +42,7 @@ python3 -c 'import hashlib,json; f=open("linux-root.img","rb"); assert hashlib.f
 
 UEFI 使用锁定版本的官方 sheng 内存图和 ABL 探测逻辑。构建前校验该文件与上游提交一致。12 GiB 型号的实际可用内存和启动稳定性需要实机验证。
 
-iPadOS 24A446 的内核集合给原生代码和数据段预留了固定空间。板级 C/C++ 对象和 Wi-Fi 驱动使用 `-Os`，视频与 Wi-Fi 的大缓冲区在设备首次使用时分配。实现依据设备移植记录中的三项改动。[Wi-Fi 尺寸优化](https://github.com/Soneoylys/UniXNU-sheng/commit/cd2e12f0f15f) · [板级对象尺寸优化](https://github.com/Soneoylys/UniXNU-sheng/commit/b8ed0509c009) · [驱动缓冲区](https://github.com/Soneoylys/UniXNU-sheng/commit/9b0fdfd4d997)
+iPadOS 24A446 的内核集合给原生代码和数据段预留了固定空间。板级 C/C++ 对象使用 `-Oz`，Wi-Fi 驱动使用 `-Os`，视频与 Wi-Fi 的大缓冲区在设备首次使用时分配。预链接采用设备维护者针对该 kernelcache 和函数内容 SHA-256 核验过的 `ml_at_interrupt_context` 符号清单。[Wi-Fi 尺寸优化](https://github.com/Soneoylys/UniXNU-sheng/commit/cd2e12f0f15f) · [板级对象尺寸优化](https://github.com/Soneoylys/UniXNU-sheng/commit/c59747242e86) · [驱动缓冲区](https://github.com/Soneoylys/UniXNU-sheng/commit/9b0fdfd4d997) · [符号清单](https://github.com/Soneoylys/UniXNU-sheng/commit/5b9df78c3835)
 
 两个入口都显式选择 `ipados-27.0.1-24A446`。构建前检查 UniXNU 合并后的 iPad 型号、defconfig、根卷、Data、音频、Wi-Fi 和蓝牙目标，并在固定的 Apple XNU 源码上顺序试用全部补丁。首次安装请使用新检出目录；构建会检查本地覆盖配置和已有的 Data 种子。启动镜像打包后，从清单指定的 addon 读取实际签入的七个图形、音频和无线二进制文件，核对其 Mach-O 平台及架构。
 

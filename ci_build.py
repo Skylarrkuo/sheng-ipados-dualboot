@@ -13,6 +13,7 @@ import sys
 from audit_target import check_inputs, verify_profile
 from configure import BOARD, CONFIG, CORE, DEVICE, HERE, SRC
 from kernel_port import BUFFERS
+from ci_overlay import REVIEWED_SYMBOLS
 
 sys.path.insert(0, str(CORE / "scripts"))
 from unixnu import cli, feeds, firmware, kernel, package, patches, payload, pipeline, runtime, toolchain
@@ -118,7 +119,7 @@ def key(ctx, stage):
     elif stage == "link":
         dependencies = [receipt("archives"), digest(ctx.config_path)]
     elif stage == "prelink":
-        dependencies = [receipt("link"), receipt("reference"), ctx.board["kernel"]["prelink"]]
+        dependencies = [receipt("link"), receipt("reference"), ctx.board["kernel"]["prelink"], digest(REVIEWED_SYMBOLS)]
     elif stage == "package":
         dependencies = [ctx.args.target, digest(BOARD / "unixnu.lock")]
     elif stage == "payload":

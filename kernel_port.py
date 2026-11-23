@@ -15,10 +15,12 @@ def fit_ipados_collection(board, edit):
          "optimization = '-Os' if os.environ.get('UNIXNU_IPSW_BUILD') == '24A446' else '-O2'\n"
          "flags = ['-target', TRIPLE, '-mkernel', optimization,"),
     ])
-    edit(board / "scripts/build-gop-legacy-display-27.py", [
-        ("def compile_cpp(src, dst, extra=()):",
-         "board_optimization = ('-Os',) if BUILD == '24A446' and not MACOS else ()\n\n\n"
-         "def compile_cpp(src, dst, extra=()):"),
+    board_build = board / "scripts/build-gop-legacy-display-27.py"
+    recipe = "def compile_cpp(src, dst, extra=()):"
+    size_flags = "board_optimization = ('-Os',) if BUILD == '24A446' and not MACOS else ()\n\n\n"
+    previous = size_flags + recipe if size_flags in board_build.read_text() else recipe
+    edit(board_build, [
+        (previous, size_flags.replace("'-Os'", "'-Oz'") + recipe),
         ("str(ROOT / '.cache/xnu-work/osfmk'), *extra]", "str(ROOT / '.cache/xnu-work/osfmk'), *board_optimization, *extra]"),
         ("str(ROOT / 'kits/sheng')]\n    run(cmd, cwd=rc['directory'])",
          "str(ROOT / 'kits/sheng'), *board_optimization]\n    run(cmd, cwd=rc['directory'])"),
