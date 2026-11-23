@@ -20,7 +20,7 @@ from unixnu import cli, feeds, firmware, kernel, package, patches, payload, pipe
 from unixnu.config import Context
 
 CACHE = HERE / ".checkpoints"
-STAGES = ("gpu", "runtime", "archives", "reference", "link", "prelink", "package", "payload", "firmware")
+STAGES = ("gpu", "runtime", "archives", "reference", "link", "prelink", "package", "payload", "firmware", "compressor")
 
 
 def read(path):
@@ -120,7 +120,7 @@ def key(ctx, stage):
         dependencies = [receipt("archives"), digest(ctx.config_path)]
     elif stage == "prelink":
         dependencies = [receipt("link"), receipt("reference"), ctx.board["kernel"]["prelink"], digest(REVIEWED_SYMBOLS)]
-    elif stage == "package":
+    elif stage in ("package", "compressor"):
         dependencies = [ctx.args.target, digest(BOARD / "unixnu.lock")]
     elif stage == "payload":
         dependencies = [receipt("prelink"), receipt("runtime"), receipt("archives"), receipt("package"),
@@ -162,6 +162,10 @@ def build(ctx, stage):
         payload.finish_build(ctx)
     elif stage == "firmware":
         firmware.build(ctx, modules, cli.need_uefi(ctx), package.edk2_dir(ctx, modules), ctx.args.target)
+    elif stage == "compressor":
+        directory = package.edk2_dir(ctx, modules) / "BaseTools/Source/C"
+        if not os.access(directory / "bin/TianoCompress", os.X_OK):
+            subprocess.run(["make", "-C", directory, f"-j{ctx.jobs}", "TianoCompress"], check=True)
 
 
 def outputs(ctx, stage):
@@ -186,6 +190,8 @@ def outputs(ctx, stage):
     if stage == "payload":
         _, image, report = payload.paths(ctx)
         return [image, report]
+    if stage == "compressor":
+        return [(package.edk2_dir(ctx, feeds.resolve(ctx)) / "BaseTools/Source/C/bin/TianoCompress").resolve()]
     return [firmware.fd_path(ctx, cli.need_uefi(ctx), ctx.args.target), ctx.tree / ctx.board["bootimg"]["dtb"]]
 
 
