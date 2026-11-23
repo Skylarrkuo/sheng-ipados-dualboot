@@ -24,6 +24,7 @@ case "$mode" in
     export DEVELOPER_DIR=${DEVELOPER_DIR:-/Applications/Xcode_26.6.app/Contents/Developer}
     xcodebuild -version
     python3 src/UniXNU-sheng/scripts/extract-files.py
+    python3 prepare_wifi.py
     (cd src/UniXNU-sheng && bash scripts/package.sh --os 27 --uefi "$project/src/uefi-sheng" --init-data)
     python3 verify_boot.py
     cp "$target/boot/boot.img" "$target/package.manifest.json" "$target/runtime/data.dbr" "$output/"
