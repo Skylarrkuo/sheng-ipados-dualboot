@@ -31,7 +31,7 @@ def checkout(minimal=False):
         if git(path, "rev-parse", "HEAD") != rev:
             raise ValueError(f"{name}: expected {rev}")
         if not minimal:
-            git(path, "submodule", "update", "--init", "--recursive", "--jobs", "8")
+            git(path, "submodule", "update", "--init", "--recursive", "--depth", "1", "--jobs", "8")
     if minimal:
         git(BOARD, "submodule", "update", "--init", "--depth", "1", "drivers/ShengUfs")
 
