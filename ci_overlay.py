@@ -2,6 +2,16 @@
 
 
 def configure_ci(core, edit):
+    layout = core / "kits/XnuPrelink/fileset_layout.py"
+    if layout.is_file():  # The root-only checkout omits the prelink kit.
+        edit(layout, [
+            ("raise ValueError('Native code would collide with collection data')",
+             "raise ValueError(f'Native code end {code_end:#x} exceeds collection data at '"
+             " f'{self.roots[\"__DATA\"][\"va\"]:#x} by {code_end - self.roots[\"__DATA\"][\"va\"]} bytes')"),
+            ("raise ValueError(f'Native {segment[\"name\"]} overlaps a retained segment')",
+             "conflicts = [(hex(b), hex(e)) for b, e in self.occupied + placed if begin < e and b < end]\n"
+             "                raise ValueError(f'Native {segment[\"name\"]} {begin:#x}..{end:#x} overlaps {conflicts}')"),
+        ])
     edit(core / "scripts/build-boot-runtime.py", [
         ("plugin = build_plugin(request['target'])",
          "plugin = (ROOT / 'build/adreno-metal-plugin27'\n"

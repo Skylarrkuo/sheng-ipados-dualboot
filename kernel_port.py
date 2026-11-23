@@ -1,7 +1,38 @@
 """Select only the interfaces supplied by the device's iPadOS kernel."""
+from pathlib import Path
+import subprocess
+
+
+BUFFERS = Path(__file__).resolve().parent / "patches/sheng-ipados-driver-buffers.patch"
+
+
+def fit_ipados_collection(board, edit):
+    # The 24A446 kernel collection has fixed code and data boundaries. The
+    # device record documents these size flags for its Wi-Fi and board objects.
+    edit(board / "scripts/build-ath12k-wifi.py", [
+        ("import hashlib, json, shlex", "import hashlib, json, os, shlex"),
+        ("flags = ['-target', TRIPLE, '-mkernel', '-O2',",
+         "optimization = '-Os' if os.environ.get('UNIXNU_IPSW_BUILD') == '24A446' else '-O2'\n"
+         "flags = ['-target', TRIPLE, '-mkernel', optimization,"),
+    ])
+    edit(board / "scripts/build-gop-legacy-display-27.py", [
+        ("def compile_cpp(src, dst, extra=()):",
+         "board_optimization = ('-Os',) if BUILD == '24A446' and not MACOS else ()\n\n\n"
+         "def compile_cpp(src, dst, extra=()):"),
+        ("str(ROOT / '.cache/xnu-work/osfmk'), *extra]", "str(ROOT / '.cache/xnu-work/osfmk'), *board_optimization, *extra]"),
+        ("str(ROOT / 'kits/sheng')]\n    run(cmd, cwd=rc['directory'])",
+         "str(ROOT / 'kits/sheng'), *board_optimization]\n    run(cmd, cwd=rc['directory'])"),
+    ])
+    # Keep full-size video and Wi-Fi buffers. The device driver's first use
+    # allocates their backing storage instead of placing it in kernel __DATA.
+    git = ["git", "-C", str(board), "apply"]
+    if subprocess.run([*git, "--reverse", "--check", str(BUFFERS)], capture_output=True).returncode:
+        subprocess.run([*git, "--check", str(BUFFERS)], check=True)
+        subprocess.run([*git, str(BUFFERS)], check=True)
 
 
 def configure_drivers(core, board, edit):
+    fit_ipados_collection(board, edit)
     desktop = "#if defined(XNU_TARGET_OS_OSX) && XNU_TARGET_OS_OSX\n"
     # The iPadOS series has the common block hash accounting, but not the
     # optional per-core SHA timing counters used by this single diagnostic row.

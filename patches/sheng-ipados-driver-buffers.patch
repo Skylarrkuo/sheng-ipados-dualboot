@@ -1,0 +1,222 @@
+Source: https://github.com/Soneoylys/UniXNU-sheng/commit/9b0fdfd4d997d530706597563a673e7401a8556f
+diff --git a/drivers/QcomIris/kernel/IrisMedia.cpp b/drivers/QcomIris/kernel/IrisMedia.cpp
+--- a/drivers/QcomIris/kernel/IrisMedia.cpp
++++ b/drivers/QcomIris/kernel/IrisMedia.cpp
+@@ -87,17 +87,46 @@ struct Note {   /* what the event thread hands to the sink */
+     uint32_t event;
+ };
+
+-Media gTable[MaxSessions];
++/* The session table (MaxSessions entries, 104 KiB) and the ring (RingSize notes, 42 KiB) are allocated by tables() when the device
++ * is first used: the iPadOS kernel's __DATA has no room for them below the collection's retained kexts. */
++Media *gTable;
+ uint32_t gNextId = 1;
+-Note gRing[RingSize];
++Note *gRing;
+ uint32_t gHead, gTail;          /* under the device's lock */
+ bool gThreadStarted;
+ void (*gSink)(void *, const uint8_t *, uint32_t);
+ void *gSinkContext;
+
+ IOLock *lock() { return QcomIrisDeviceLock(); }
++
++/* Without the lock held (the allocation may block): the table and the ring, published together under the lock. */
++bool tables() {
++    IOLockLock(lock());
++    const bool have = gRing != nullptr;
++    IOLockUnlock(lock());
++    if (have) return true;
++    Media *table = static_cast<Media *>(IOMallocZero(sizeof(Media) * MaxSessions));
++    Note *ring = static_cast<Note *>(IOMallocZero(sizeof(Note) * RingSize));
++    if (table && ring) {
++        IOLockLock(lock());
++        if (!gRing) {
++            gTable = table;
++            gRing = ring;
++            table = nullptr;
++            ring = nullptr;
++        }
++        IOLockUnlock(lock());
++    }
++    if (table) IOFree(table, sizeof(Media) * MaxSessions);
++    if (ring) IOFree(ring, sizeof(Note) * RingSize);
++    IOLockLock(lock());
++    const bool ready = gRing != nullptr;
++    IOLockUnlock(lock());
++    return ready;
++}
++
+ Media *find(uint32_t id) {
+-    for (Media &m : gTable) if (m.used && m.id == id) return &m;
++    if (gTable) for (unsigned i = 0; i < MaxSessions; ++i) if (gTable[i].used && gTable[i].id == id) return &gTable[i];
+     return nullptr;
+ }
+ Media *ofIris(struct qcom_iris_session *is) {
+@@ -426,7 +455,7 @@ bool iris_media_is_up(unsigned device) { return device == IrisMediaDecoder && Qc
+ const char *iris_media_card(unsigned device) { return device == IrisMediaDecoder ? "iris decoder" : ""; }
+
+ void iris_media_set_sink(unsigned device, void (*sink)(void *, const uint8_t *, uint32_t), void *context) {
+-    if (device != IrisMediaDecoder || !QcomIrisDeviceReady()) return;
++    if (device != IrisMediaDecoder || !QcomIrisDeviceReady() || !tables()) return;
+     IOLockLock(lock());
+     gSink = sink;
+     gSinkContext = context;
+@@ -441,9 +470,10 @@ void iris_media_set_sink(unsigned device, void (*sink)(void *, const uint8_t *,
+
+ int iris_media_open(unsigned device, uint32_t *session) {
+     if (!iris_media_is_up(device) || !session) return Enodev;
++    if (!tables()) return Enomem;
+     IOLockLock(lock());
+     Media *m = nullptr;
+-    for (Media &candidate : gTable) if (!candidate.used) { m = &candidate; break; }
++    for (unsigned i = 0; i < MaxSessions; ++i) if (!gTable[i].used) { m = &gTable[i]; break; }
+     if (m) {
+         memset(m, 0, sizeof *m);
+         m->used = true;
+diff --git a/drivers/QcomIris/kernel/VtHost.cpp b/drivers/QcomIris/kernel/VtHost.cpp
+--- a/drivers/QcomIris/kernel/VtHost.cpp
++++ b/drivers/QcomIris/kernel/VtHost.cpp
+@@ -66,19 +66,22 @@ volatile uint32_t vt_host_frames_skipped;   // of those, never given to the devi
+ volatile uint32_t vt_host_error_stage;
+ volatile int32_t vt_host_error_value;
+ volatile uint32_t vt_host_replies, vt_host_unknown, vt_host_last_unknown;
+-// The host's last diagnostic lines, a ring of 64 (the kernel's message buffer turns over too fast to keep them).
+-char vt_host_trace[64][112];
++// The host's last diagnostic lines, a ring of 64 (the kernel's message buffer turns over too fast to keep them). vt_host_client_open
++// allocates it: the iPadOS kernel's __DATA has no room for it below the collection's retained kexts.
++char (*vt_host_trace)[112];
+ volatile uint32_t vt_host_trace_count;
+ }
+
+ namespace {
+
+ void trace(const char *format, ...) __attribute__((format(printf, 1, 2)));
+ void trace(const char *format, ...) {
++    char (*ring)[112] = __atomic_load_n(&vt_host_trace, __ATOMIC_ACQUIRE);
++    if (!ring) return;
+     const uint32_t n = __atomic_fetch_add(&vt_host_trace_count, 1, __ATOMIC_RELAXED);
+     va_list arguments;
+     va_start(arguments, format);
+-    vsnprintf(vt_host_trace[n % 64], sizeof vt_host_trace[0], format, arguments);
++    vsnprintf(ring[n % 64], sizeof ring[0], format, arguments);
+     va_end(arguments);
+ }
+
+@@ -2746,6 +2749,16 @@ extern "C" {
+ bool vt_host_available(void) { return decoderDevice() != ~0u || encoderDevice() != ~0u; }
+
+ void *vt_host_client_open(void *transport, bool (*send)(void *, const uint8_t *, uint32_t), task_t task, int pid) {
++    if (!__atomic_load_n(&vt_host_trace, __ATOMIC_ACQUIRE)) {
++        void *bytes = IOMallocData(64 * 112);
++        if (bytes) {
++            memset(bytes, 0, 64 * 112);
++            char (*expected)[112] = nullptr;
++            if (!__atomic_compare_exchange_n(&vt_host_trace, &expected, static_cast<char (*)[112]>(bytes), false, __ATOMIC_ACQ_REL,
++                                             __ATOMIC_ACQUIRE))
++                IOFreeData(bytes, 64 * 112);
++        }
++    }
+     if (!gTableLock) {
+         IOLock *lock = IOLockAlloc();
+         if (!OSCompareAndSwapPtr(nullptr, lock, &gTableLock)) IOLockFree(lock);
+diff --git a/package/BootLog.c b/package/BootLog.c
+--- a/package/BootLog.c
++++ b/package/BootLog.c
+@@ -186,9 +186,10 @@ extern volatile uint32_t native_wifi_ev[48] __attribute__((weak_import));
+ extern volatile uint32_t native_wifi_ldo[24] __attribute__((weak_import));
+ extern volatile uint32_t native_wifi_mhi[16] __attribute__((weak_import));
+ extern volatile uint32_t native_wifi_mhi_ms[8] __attribute__((weak_import));
+-extern char native_wifi_text[512][112] __attribute__((weak_import));
++/* WifiProbe.cpp allocates the rings: 512 lines of text, 128 of notes. */
++extern char (*native_wifi_text)[112] __attribute__((weak_import));
+ extern volatile uint32_t native_wifi_text_n __attribute__((weak_import));
+-extern char native_wifi_note[128][112] __attribute__((weak_import));
++extern char (*native_wifi_note)[112] __attribute__((weak_import));
+ extern volatile uint32_t native_wifi_note_n __attribute__((weak_import));
+ extern int native_ufs_extra_fault(uint32_t *) __attribute__((weak_import));
+ extern struct {uint32_t stage, scans, frames, beacons, bss_seen; int last_err;} nw_wifi_stats __attribute__((weak_import));
+@@ -269,7 +270,8 @@ extern volatile uint32_t vt_host_sessions __attribute__((weak_import)), vt_host_
+     vt_host_frames_out __attribute__((weak_import)), vt_host_frames_dropped __attribute__((weak_import)),
+     vt_host_errors __attribute__((weak_import)), vt_host_error_stage __attribute__((weak_import));
+ extern volatile int32_t vt_host_error_value __attribute__((weak_import));
+-extern char vt_host_trace[64][112] __attribute__((weak_import));
++/* VtHost.cpp allocates the ring of 64 lines. */
++extern char (*vt_host_trace)[112] __attribute__((weak_import));
+ extern volatile uint32_t vt_host_trace_count __attribute__((weak_import));
+ extern volatile uint32_t iris_media_stats[14] __attribute__((weak_import));
+ extern volatile uint32_t native_adreno_recovery_fault[5] __attribute__((weak_import));
+@@ -1240,7 +1242,7 @@ static size_t compose(char *out, size_t cap, uint32_t slot, unsigned now) {
+       at = put(out, at, cap, row, sizeof row);
+     }
+     // [video vt log]: the host's last 64 lines (VtHost.cpp, trace), oldest first.
+-    if (&vt_host_trace_count && vt_host_trace_count) {
++    if (&vt_host_trace_count && vt_host_trace_count && &vt_host_trace && vt_host_trace) {
+       const uint32_t n = vt_host_trace_count;
+       for (uint32_t i = n > 64 ? n - 64 : 0; i < n; ++i) {
+         snprintf(row, sizeof row, "[video vt log] %u %.110s", i, vt_host_trace[i % 64]);
+@@ -1723,7 +1725,7 @@ static size_t compose(char *out, size_t cap, uint32_t slot, unsigned now) {
+           at = put(out, at, cap, row, sizeof row);
+         }
+       }
+-      if (&native_wifi_text && native_wifi_text_n) {
++      if (&native_wifi_text && native_wifi_text && native_wifi_text_n) {
+         if (&nw_wifi_stats) {
+           snprintf(row, sizeof row, "[wifi-nw] stage=%u scans=%u frames=%u beacons=%u networks=%u err=%d lines=%u", nw_wifi_stats.stage, nw_wifi_stats.scans, nw_wifi_stats.frames,
+                    nw_wifi_stats.beacons, nw_wifi_stats.bss_seen, nw_wifi_stats.last_err, native_wifi_text_n);
+@@ -1751,7 +1753,7 @@ static size_t compose(char *out, size_t cap, uint32_t slot, unsigned now) {
+         }
+         shown = i;
+         // the notices among them, which the debug lines cannot push out of their own ring: at most 40 new ones per slot
+-        if (&native_wifi_note) {
++        if (&native_wifi_note && native_wifi_note) {
+           static uint32_t noted;
+           const uint32_t m = native_wifi_note_n;
+           uint32_t j = noted;
+diff --git a/package/WifiProbe.cpp b/package/WifiProbe.cpp
+--- a/package/WifiProbe.cpp
++++ b/package/WifiProbe.cpp
+@@ -80,9 +80,10 @@ volatile uint32_t native_wifi_mhi[16];
+ // [4] the boot loader was started, [5] the contexts were programmed, [6] the run ended.
+ volatile uint32_t native_wifi_mhi_ms[8];
+ // The WiFi module's messages: a ring of 512 lines, newest at native_wifi_text_n - 1.
+-char native_wifi_text[512][112]; volatile uint32_t native_wifi_text_n;
+ // The same messages of level 6 and below (notices, warnings, errors) in a ring of their own, which the driver's debug lines do not push out.
+-char native_wifi_note[128][112]; volatile uint32_t native_wifi_note_n;}
++// sheng_wifi_probe allocates both rings (70 KiB): the iPadOS kernel's __DATA has no room for them below the collection's retained kexts.
++char (*native_wifi_text)[112]; volatile uint32_t native_wifi_text_n;
++char (*native_wifi_note)[112]; volatile uint32_t native_wifi_note_n;}
+
+ extern kmod_info_t g_kernel_kmod_info;
+ extern "C" void native_wifi_net_static_init(void) __asm__("__GLOBAL__sub_I_WifiNet.cpp");
+@@ -738,13 +739,14 @@ void pLog(int level, const char *line) {
+     for (const char *c = line; *c; ++c) h = (h ^ static_cast<uint8_t>(*c)) * 16777619u;
+     h ^= static_cast<uint32_t>(level);
+     for (uint32_t r : recent) if (r == h) {++gLogRepeats; return;}
++    if (!native_wifi_text) {++gLogRepeats; return;}
+     memmove(&recent[1], &recent[0], sizeof recent - sizeof recent[0]);
+     recent[0] = h;
+     const uint64_t now = pNow();
+     if (!first) first = now;
+     const uint32_t i = __atomic_fetch_add(const_cast<uint32_t *>(&native_wifi_text_n), 1u, __ATOMIC_RELAXED) % 512;
+     snprintf(native_wifi_text[i], sizeof native_wifi_text[i], "%u %d %.100s", static_cast<uint32_t>(now - first), level, line);
+-    if (level <= 6) {
++    if (level <= 6 && native_wifi_note) {
+         const uint32_t j = __atomic_fetch_add(const_cast<uint32_t *>(&native_wifi_note_n), 1u, __ATOMIC_RELAXED) % 128;
+         memcpy(native_wifi_note[j], native_wifi_text[i], sizeof native_wifi_note[j]);
+     }
+@@ -1693,6 +1695,15 @@ extern "C" int sheng_wifi_file(const char *name, const uint8_t **data, size_t *s
+ extern "C" void sheng_wifi_probe(void) {
+     unsigned stage = 0;
+     if (!PE_parse_boot_argn("wifi", &stage, sizeof stage) || stage < 1 || native_wifi_stats[0]) return;
++    // the message rings, before the module's first line
++    char (**rings[2])[112] = {&native_wifi_text, &native_wifi_note};
++    const size_t lines[2] = {512, 128};
++    for (unsigned r = 0; r < 2; ++r) {
++        if (*rings[r]) continue;
++        void *bytes = IOMallocData(lines[r] * 112);
++        if (bytes) memset(bytes, 0, lines[r] * 112);
++        *rings[r] = static_cast<char (*)[112]>(bytes);
++    }
+     thread_t thread = nullptr;
+     if (kernel_thread_start(wifiThread, reinterpret_cast<void *>(uintptr_t(stage)), &thread) == KERN_SUCCESS) thread_deallocate(thread);
+     else native_wifi_stats[0] = -7;

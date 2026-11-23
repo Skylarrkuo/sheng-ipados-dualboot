@@ -12,6 +12,7 @@ import sys
 
 from audit_target import check_inputs, verify_profile
 from configure import BOARD, CONFIG, CORE, DEVICE, HERE, SRC
+from kernel_port import BUFFERS
 
 sys.path.insert(0, str(CORE / "scripts"))
 from unixnu import cli, feeds, firmware, kernel, package, patches, payload, pipeline, runtime, toolchain
@@ -105,7 +106,7 @@ def key(ctx, stage):
                         digest(HERE / "prepare_wifi.py"), os.environ["SHENG_DATA_GENERATION"]]
     elif stage == "archives":
         dependencies = [CONFIG, digest(ctx.config_path), inputs(ctx)["inputs"]["data_ramdisk"]["sha256"],
-                        digest(HERE / "configure.py"), digest(HERE / "kernel_port.py"),
+                        digest(HERE / "configure.py"), digest(HERE / "kernel_port.py"), digest(BUFFERS),
                         digest(BOARD / "unixnu.lock")]
     elif stage == "reference":
         folder = ctx.tree / "build"
@@ -141,6 +142,9 @@ def build(ctx, stage):
     elif stage in ("archives", "reference", "link", "prelink"):
         bind(ctx)
         if stage == "archives":
+            # A restored runtime carries binaries only. A driver rebuild still
+            # needs the locked Wi-Fi source checkout on this fresh runner.
+            subprocess.run([sys.executable, HERE / "prepare_wifi.py"], check=True)
             write(CACHE / "pre-archives.json", sorted(p.name for p in (ctx.tree / "build").iterdir()))
         with toolchain.environment(ctx):
             if stage == "prelink":
