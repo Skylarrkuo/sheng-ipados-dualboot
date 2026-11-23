@@ -1,5 +1,6 @@
 """Prepare dedicated upstream checkouts for the sheng second-system build."""
 import argparse
+import json
 import shutil
 import subprocess
 import tomllib
@@ -48,6 +49,29 @@ def edit(path, replacements):
     path.write_text(text, encoding="utf-8", newline="\n")
 
 
+def ipados_patch_series(spec):
+    directory = BOARD / "patches/xnu-12377"
+    source_name = "sheng-startup-failure-log.patch"
+    patched_name = "ipados-startup-failure-log.patch"
+    source = (directory / source_name).read_text(encoding="utf-8")
+    old = " #else\n \tint data_error = native_owner_data_prepare(p, (user_addr_t)scratch_addr);\n #endif\n"
+    new = (" #if defined(XNU_OWNER_DATA_MOUNT) && XNU_OWNER_DATA_MOUNT\n"
+           " \tboot_progress_stage(\"Data mount enter\");\n"
+           " \tint data_error = native_owner_data_prepare(p, (user_addr_t)scratch_addr);\n")
+    if source.count(old) != 1:
+        raise ValueError("Unexpected XNU startup log patch")
+    (directory / patched_name).write_text(source.replace(old, new), encoding="utf-8", newline="\n")
+    order = (directory / "series").read_text(encoding="utf-8").splitlines()
+    if order.count(source_name) != 1:
+        raise ValueError("Unexpected sheng XNU patch order")
+    order[order.index(source_name)] = patched_name
+    (directory / "series-ipados-dualboot").write_text("\n".join(order) + "\n", encoding="utf-8", newline="\n")
+    refs = list(spec["kernel"]["patch_series"])
+    index = refs.index("device:patches/xnu-12377/series")
+    refs[index] += "-ipados-dualboot"
+    return refs
+
+
 def configure():
     for name, rev in CONFIG["source"].items():
         if git(SRC / name, "rev-parse", "HEAD") != rev:
@@ -75,21 +99,29 @@ def configure():
          "    capacity = spec['capacity_bytes']"),
         ("'userdata_bytes': capacity, 'flash_command': f'fastboot flash userdata {image}'",
          "'target_partition': 'linux', 'partition_bytes': capacity, 'flash_command': f'fastboot flash linux {image}'")])
+    # Apply the device geometry only to the pinned iPadOS profile. Use the
+    # original component order and drop the unpartitioned Android geometry.
     board = BOARD / "board.toml"
-    edit(board, [
-        ('"first_lba" = 3094592\n"last_lba" = 64007162',
-         f'target_partition = "linux"\ncapacity_bytes = {capacity}'),
-        ("data_gib = 215", f"data_gib = {DEVICE['data_gib']}"),
-        ('["package"]\n', f'["package"]\nboot_partition_bytes = {DEVICE["boot_b_bytes"]}\n'),
-        ('"AppleKeyStoreState", "Adreno740", "AdrenoMetal"]',
-         '"AppleKeyStoreState", "Adreno740", "AdrenoMetal", "QcomGeniSpi"]')])
-    result = tomllib.loads(board.read_text(encoding="utf-8"))
-    assert result["board"]["os_profile"] == DEVICE["profile"]
-    assert result["userdata"]["target_partition"] == "linux"
-    # The early static map can be used before ABL has supplied a dynamic map.
-    edit(SRC / "uefi-sheng/Platforms/Xiaomi/shengPkg/Library/MemoryMapLib/MemoryMapLib.c",
-         [('{"DRAM bank 1 low", 0x880000000, 0x3B300000,',
-           '{"DRAM bank 1 low", 0x880000000, 0x39D00000,')])
+    original = subprocess.check_output(["git", "-C", BOARD, "show", "HEAD:board.toml"]).decode()
+    spec = tomllib.loads(original)
+    profile = DEVICE["profile"]
+    if spec["board"]["os_profile"] != profile:
+        raise ValueError("Unexpected upstream default board profile")
+    components = list(dict.fromkeys([*spec["components"]["include"], "QcomGeniSpi"]))
+    kernel_series = ipados_patch_series(spec)
+    prefix = f'os_overrides."{profile}"'
+    overlay = (f'\n[{prefix}]\nremove = ["userdata.first_lba", "userdata.last_lba"]\n'
+               f'\n[{prefix}.userdata]\ntarget_partition = "linux"\ncapacity_bytes = {capacity}\n'
+               f'\n[{prefix}.package]\nboot_partition_bytes = {DEVICE["boot_b_bytes"]}\n'
+               f'\n[{prefix}.payload.runtime]\ndata_gib = {DEVICE["data_gib"]}\n'
+               f'\n[{prefix}.kernel]\npatch_series = {json.dumps(kernel_series)}\n'
+               f'\n[{prefix}.components]\ninclude = {json.dumps(components)}\n')
+    if board.read_text(encoding="utf-8") not in (original, original + overlay):
+        raise ValueError("Unexpected edits to the dedicated upstream board.toml")
+    board.write_text(original + overlay, encoding="utf-8", newline="\n")
+    # This port uses the firmware repository's original static and ABL maps.
+    subprocess.run(["git", "-C", SRC / "uefi-sheng", "diff", "--quiet", "HEAD", "--",
+                    "Platforms/Xiaomi/shengPkg/Library/MemoryMapLib/MemoryMapLib.c"], check=True)
     # Apply after the two official translator patches, through the upstream tree-identity check.
     # The existing Mach implementation operates only on the calling task and checks the returned size.
     shutil.copyfile(HERE / "patches/metal2vulkan-ios.patch", CORE / "scripts/data/metal2vulkan-ios.patch")

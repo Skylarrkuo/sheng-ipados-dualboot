@@ -20,7 +20,7 @@ gh run download RUN_ID --dir images
 | 产物 | 用途与校验 |
 | --- | --- |
 | `sheng-24A446-linux-root` | zstd 根镜像分卷，目标是 GPT 名为 `linux` 的分区。包含 OS、SystemOS 以及上游签名头对应的两份逐块哈希表。 |
-| `sheng-24A446-boot` | `boot.img`、此次首装的 `data.dbr`、上游构建清单与 SHA-256。启动镜像需通过 Android v0 镜像头、有效 ramdisk 和 192 MiB 上限校验。 |
+| `sheng-24A446-boot` | `boot.img`、此次首装的 `data.dbr`、上游清单、目标平台检查结果 `target-audit.json` 与 SHA-256。启动镜像需通过 Android v0 镜像头、有效 ramdisk 和 192 MiB 上限校验。 |
 
 GitHub Actions 的产物保留七天。在 Windows 上，从本仓库目录运行 `python unpack_root.py images/sheng-24A446-linux-root linux-root.img`（Python 3.14、NTFS），可边解压边核对分卷和整份根镜像。在 macOS 或 Linux 上也可在根镜像目录运行以下命令。
 
@@ -36,6 +36,8 @@ python3 -c 'import hashlib,json; f=open("linux-root.img","rb"); assert hashlib.f
 
 官方分区工具用于把位于 GPT 末尾的 F2FS `userdata` 缩小，并建立名为 `unixnu` 的分区。本机已有独立的 `linux` 分区，构建流程直接使用现有布局。驱动只接受精确匹配且容量符合配置的 `linux`；未找到、重名、大小有误或 GPT 分区重叠时停止。存储驱动通过已选分区的边界计算 Data 和日志位置。打包器单独校验根卷、80 GiB Data、位图与头部、4 MiB 间隔和 1 GiB 日志预留。
 
-UEFI 使用官方 ABL 内存图筛选逻辑，并按本机 12 GiB 型号的既有测量把静态低段结束地址限制为 `0x8b9d00000`。官方 iPadOS 自身的 XNU 内存设置保留。构建测试不代替屏幕启动和整机内存稳定性验证。
+UEFI 使用锁定版本的官方 sheng 内存图和 ABL 探测逻辑。构建前校验该文件与上游提交一致。12 GiB 型号的实际可用内存和启动稳定性需要实机验证。
+
+两个入口都显式选择 `ipados-27.0.1-24A446`。构建前检查 UniXNU 合并后的 iPad 型号、defconfig、根卷、Data、音频、Wi-Fi 和蓝牙目标，并在固定的 Apple XNU 源码上顺序试用全部补丁。首次安装请使用新检出目录；构建会检查本地覆盖配置和已有的 Data 种子。启动镜像打包后，从清单指定的 addon 读取实际签入的七个图形、音频和无线二进制文件，核对其 Mach-O 平台及架构。
 
 参考 [设备支持记录](https://unixnu.com/devices/sheng)、[双系统分区](https://unixnu.com/porting/dual-system-partition)、[UFS 存储](https://unixnu.com/porting/ufs)、[根镜像布局](https://unixnu.com/guide/userdata)、[构建与启动](https://unixnu.com/building)。

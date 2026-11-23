@@ -3,7 +3,7 @@ set -euo pipefail
 cd "$(dirname "$0")"
 project=$PWD
 mode=${1:?Choose root or boot}
-profile=ipados-27.0.1-24A446
+profile=$(python3 -c 'from configure import DEVICE; print(DEVICE["profile"])')
 target="$project/src/UniXNU/out/sheng/$profile/sheng_ipados27"
 output="$project/dist/$mode"
 mkdir -p "$output"
@@ -19,19 +19,25 @@ case "$mode" in
     ;;
   boot)
     python3 configure.py --fetch
+    python3 audit_target.py
+    if [[ -e "$target/runtime/data.dbr" ]]; then
+      echo "First-install build needs an empty target. Preserve the existing Data seed and use a fresh checkout." >&2
+      exit 1
+    fi
     # A stable lab ADT identity; the public build uses no physical tablet identifier.
     export UNIXNU_UNIQUE_CHIP_ID=${UNIXNU_UNIQUE_CHIP_ID:-53483653}
     export DEVELOPER_DIR=${DEVELOPER_DIR:-/Applications/Xcode_26.6.app/Contents/Developer}
     xcodebuild -version
+    xcrun --sdk iphoneos --show-sdk-path
     python3 src/UniXNU-sheng/scripts/extract-files.py
     python3 prepare_wifi.py
-    (cd src/UniXNU-sheng && bash scripts/package.sh --os 27 --uefi "$project/src/uefi-sheng" --init-data)
+    (cd src/UniXNU-sheng && bash scripts/package.sh --os "$profile" --uefi "$project/src/uefi-sheng" --init-data)
     python3 verify_boot.py
-    cp "$target/boot/boot.img" "$target/package.manifest.json" "$target/runtime/data.dbr" "$output/"
+    cp "$target/boot/boot.img" "$target/package.manifest.json" "$target/target-audit.json" "$target/runtime/data.dbr" "$output/"
     ;;
   *) echo 'Choose root or boot' >&2; exit 2 ;;
 esac
 case "$mode" in
   root) (cd "$output" && shasum -a 256 linux-root.json linux-root.img.zst.* > SHA256SUMS) ;;
-  boot) (cd "$output" && shasum -a 256 boot.img data.dbr package.manifest.json > SHA256SUMS) ;;
+  boot) (cd "$output" && shasum -a 256 boot.img data.dbr package.manifest.json target-audit.json > SHA256SUMS) ;;
 esac

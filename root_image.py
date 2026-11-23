@@ -4,11 +4,11 @@ import hashlib
 import json
 import os
 import struct
-import sys
 import tempfile
 from pathlib import Path
 
 from configure import BOARD, CORE, DEVICE, TARGET
+from audit_target import context
 
 MIB = 1 << 20
 GIB = 1 << 30
@@ -57,17 +57,12 @@ def make_table(chunks, signed, output):
 
 
 def main():
-    sys.path.insert(0, str(CORE / "scripts"))
+    os.chdir(CORE)
+    ctx = context()
+    args = ctx.args
     from unixnu import userdata
-    from unixnu.cli import parser
-    from unixnu.config import Context
     from unixnu.ipsw import Ipsw
 
-    os.chdir(CORE)
-    args = parser().parse_args(["build", "userdata", "-D", str(BOARD), "--os", "27"])
-    ctx = Context(args)
-    if ctx.work != TARGET or ctx.board["ipsw"]["build"] != "24A446":
-        raise ValueError("Unexpected target or IPSW build")
     source = Ipsw(ctx)
     policy = BOARD / "scripts/policies" / DEVICE["profile"]
     TARGET.mkdir(parents=True, exist_ok=True)

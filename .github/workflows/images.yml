@@ -20,6 +20,7 @@ jobs:
       - uses: actions/checkout@v4
       - run: |
           python3 configure.py --fetch --minimal
+          python3 audit_target.py --patches
           python3 -m unittest discover -s tests -v
           g++ -std=c++17 -Isrc/UniXNU-sheng/drivers/ShengUfs tests/storage.cpp -lcrypto -o "$RUNNER_TEMP/storage"
           "$RUNNER_TEMP/storage"
