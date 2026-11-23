@@ -34,7 +34,7 @@ python3 -c 'import hashlib,json; f=open("linux-root.img","rb"); assert hashlib.f
 
 ## 双系统适配
 
-官方分区工具用于把位于 GPT 末尾的 F2FS `userdata` 缩小，并建立名为 `unixnu` 的分区。本机已有独立的 `linux` 分区，构建流程直接使用现有布局。驱动只接受精确匹配且容量符合配置的 `linux`；未找到、重名、大小有误或 GPT 分区重叠时停止。存储驱动通过已选分区的边界计算 Data 和日志位置。打包器单独校验根卷、80 GiB Data、位图与头部、4 MiB 间隔和 1 GiB 日志预留。
+官方分区工具用于把位于 GPT 末尾的 F2FS `userdata` 缩小，并建立名为 `unixnu` 的分区。本机的 A、B 槽 GPT 备份都显示 `userdata` 与 `linux` 相邻，各为 124,748,038,144 字节；只按容量无法区分两者。驱动校验 GPT 的 CRC、分区名 `linux` 和容量。未找到、重名、大小有误或分区重叠时停止。Data 和日志位置按选中分区的边界计算。打包器校验根卷、80 GiB Data、位图与头部、4 MiB 间隔和 1 GiB 日志预留。
 
 UEFI 使用锁定版本的官方 sheng 内存图和 ABL 探测逻辑。构建前校验该文件与上游提交一致。12 GiB 型号的实际可用内存和启动稳定性需要实机验证。
 

@@ -22,7 +22,8 @@ static void setup() {
     userdata = linuxStart;
     put64(header + 32, linuxStart + 2 * linuxBlocks + 9);
     put64(header + 48, linuxStart + 2 * linuxBlocks + 4);
-    entry(0, "userdata", 1024, linuxStart - 1);
+    // The recorded sheng GPT has adjacent, equally sized userdata and linux partitions.
+    entry(0, "userdata", linuxStart - linuxBlocks, linuxStart - 1);
     entry(1, "linux", linuxStart, linuxStart + linuxBlocks - 1);
 }
 
