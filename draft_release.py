@@ -74,17 +74,27 @@ def verify():
     report = read(BOOT / "target-audit.json")
     with (BOOT / "boot.img").open("rb") as stream:
         header = stream.read(44)
-    if ((manifest["device"], manifest["os_profile"], manifest["outputs"]["boot.img"]["sha256"],
-         manifest["runtime"]["inputs"]["data_ramdisk"], report["profile"]["partition"])
-            != ("sheng", DEVICE["profile"], boot_sums["boot.img"], boot_sums["data.dbr"], ["linux", DEVICE["capacity_bytes"]])
-            or not report["binaries"] or any(v["platform"] != "iOS" for v in report["binaries"].values())
-            or header[:8] != b"ANDROID!" or struct.unpack_from("<I", header, 16)[0] == 0
+    if (manifest["device"], manifest["os_profile"]) != ("sheng", DEVICE["profile"]):
+        raise ValueError("boot build targets a different device or OS")
+    verify_partition(report["profile"]["partition"])
+    if (manifest["outputs"]["boot.img"]["sha256"] != boot_sums["boot.img"]
+            or manifest["runtime"]["inputs"]["data_ramdisk"] != boot_sums["data.dbr"]):
+        raise ValueError("boot or Data hash differs from the release manifest")
+    if not report["binaries"] or any(v["platform"] != "iOS" for v in report["binaries"].values()):
+        raise ValueError("unexpected packaged runtime platform")
+    if (header[:8] != b"ANDROID!" or struct.unpack_from("<I", header, 16)[0] == 0
             or (BOOT / "boot.img").stat().st_size > DEVICE["boot_b_bytes"]):
-        raise ValueError("boot image, packaged runtime or Data seed differs from the verified target")
+        raise ValueError("invalid boot header, missing ramdisk or boot_b capacity exceeded")
     (BOOT / "SHA256SUMS").rename(BOOT / "boot-SHA256SUMS.txt")
     assets = {**root_sums, **boot_sums, "SHA256SUMS": digest(ROOT / "SHA256SUMS"),
               "boot-SHA256SUMS.txt": digest(BOOT / "boot-SHA256SUMS.txt")}
     (HERE / "dist/release-assets.json").write_text(json.dumps(assets))
+
+
+def verify_partition(actual):
+    expected = ["linux", DEVICE["capacity_bytes"], 4096]
+    if actual != expected:
+        raise ValueError(f"boot audit partition geometry {actual!r} differs from {expected!r}")
 
 
 def upload():

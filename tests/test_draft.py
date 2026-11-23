@@ -6,9 +6,19 @@ import unittest
 from unittest.mock import patch
 
 import draft_release as draft
+from audit_target import context, verify_profile
 
 
 class DraftTests(unittest.TestCase):
+    def test_release_consumes_real_partition_audit(self):
+        audit = json.loads(json.dumps(verify_profile(context())))
+        draft.verify_partition(audit["partition"])
+        for index, value in enumerate(("userdata", 0, 512)):
+            wrong = audit["partition"].copy()
+            wrong[index] = value
+            with self.assertRaises(ValueError):
+                draft.verify_partition(wrong)
+
     def test_require_image_job(self):
         repo = "example/sheng"
         run = {"head_repository": {"full_name": repo}, "path": ".github/workflows/images.yml",
