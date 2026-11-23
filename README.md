@@ -22,7 +22,7 @@ gh run download RUN_ID --dir images
 | `sheng-24A446-linux-root` | zstd 根镜像分卷，目标是 GPT 名为 `linux` 的分区。包含 OS、SystemOS 以及上游签名头对应的两份逐块哈希表。 |
 | `sheng-24A446-boot` | `boot.img`、此次首装的 `data.dbr`、上游构建清单与 SHA-256。启动镜像需通过 Android v0 镜像头、有效 ramdisk 和 192 MiB 上限校验。 |
 
-GitHub Actions 的产物保留七天。下载后，在根镜像目录用以下命令拼接、解压并核对整份原始镜像。
+GitHub Actions 的产物保留七天。在 Windows 上，从本仓库目录运行 `python unpack_root.py images/sheng-24A446-linux-root linux-root.img`（Python 3.14、NTFS），可边解压边核对分卷和整份根镜像。在 macOS 或 Linux 上也可在根镜像目录运行以下命令。
 
 ```sh
 shasum -a 256 -c SHA256SUMS
