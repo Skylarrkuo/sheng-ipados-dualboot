@@ -84,13 +84,22 @@ def configure():
         raise ValueError("Expected a separate linux partition with 4 KiB blocks")
     header = UFS / "RootLayout.h"
     edit(header, [
+        ('Find the partition named "userdata"', 'Find the partition named "linux"'),
         ('static const char wanted[] = "userdata";', 'static const char wanted[] = "linux";'),
         ('*why = "duplicate userdata partition";', '*why = "duplicate linux partition";'),
         ('*why = "no userdata partition";', '*why = "no linux partition";'),
+        ('*why = "userdata first block read";', '*why = "linux first block read";'),
         ('  gRootDiagnostic.first = layout->userdataFirst;',
          f'  if (layout->userdataLast - layout->userdataFirst + 1 != {capacity // 4096}ULL) {{\n'
          '    *why = "linux partition size mismatch";\n    return false;\n  }\n'
          '  gRootDiagnostic.first = layout->userdataFirst;')])
+    edit(UFS / "RootDiagnostics.h", [("GPT/read lba=%llx userdata=", "GPT/read lba=%llx linux=")])
+    edit(UFS / "NativeUfs.cpp", [
+        ("UFS LUN 0 userdata window", "UFS LUN 0 linux window"),
+        ("userdata first=%llx last=%llx\\n", "linux first=%llx last=%llx\\n"),
+        ("userdata first=%llx last=%llx manifest", "linux first=%llx last=%llx manifest"),
+        ("no valid root manifest in userdata", "no valid root manifest in linux"),
+    ])
     # This release's packer sizes single-system images from the original userdata LBAs.
     # For this board the GPT location is resolved at boot; the host needs only the capacity.
     edit(CORE / "scripts/unixnu/userdata.py", [
@@ -122,6 +131,18 @@ def configure():
     # This port uses the firmware repository's original static and ABL maps.
     subprocess.run(["git", "-C", SRC / "uefi-sheng", "diff", "--quiet", "HEAD", "--",
                     "Platforms/Xiaomi/shengPkg/Library/MemoryMapLib/MemoryMapLib.c"], check=True)
+    # These declarations are referenced exclusively by the macOS root-domain
+    # notification handlers. The board compiles every driver with -Werror.
+    desktop_guard = "#if defined(XNU_TARGET_OS_OSX) && XNU_TARGET_OS_OSX\n"
+    clamshell = ('static const char kClamshellLog[] KEYBOARD_CONST = '
+                 '"sheng keyboard: clamshell %s sent to the power manager\\n";')
+    edit(BOARD / "package/KeyboardProbe.cpp", [(clamshell, desktop_guard + clamshell + "\n#endif")])
+    wake_option = "constexpr IOOptionBits kWakeEventSource = 0x1;   // kIOPMWakeEventSource (IOPMPrivate.h)"
+    edit(BOARD / "package/ShengSleep.cpp", [
+        (wake_option, desktop_guard + wake_option + "\n#endif"),
+        ("bool lidArmed() {", desktop_guard + "bool lidArmed() {"),
+        (desktop_guard + "IOReturn sleepWake(", "/* macOS root-domain notification */\nIOReturn sleepWake("),
+    ])
     # Apply after the two official translator patches, through the upstream tree-identity check.
     # The existing Mach implementation operates only on the calling task and checks the returned size.
     shutil.copyfile(HERE / "patches/metal2vulkan-ios.patch", CORE / "scripts/data/metal2vulkan-ios.patch")

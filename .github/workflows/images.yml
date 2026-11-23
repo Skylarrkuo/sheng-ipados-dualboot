@@ -17,7 +17,10 @@ jobs:
   storage-tests:
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.14'
       - run: |
           python3 configure.py --fetch --minimal
           python3 audit_target.py --patches
@@ -35,14 +38,14 @@ jobs:
       HOMEBREW_NO_AUTO_UPDATE: '1'
       UNIXNU_IPSW_JOBS: '12'
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7.0.1
       - uses: actions/setup-python@v6
         with:
           python-version: '3.14'
       - run: brew install blacktop/tap/ipsw zstd
       - name: Build and check original OS and SystemOS windows
         run: bash build.sh root
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7.0.2
         with:
           name: sheng-24A446-linux-root
           path: dist/root/
@@ -59,7 +62,7 @@ jobs:
       HOMEBREW_NO_AUTO_UPDATE: '1'
       UNIXNU_IPSW_JOBS: '12'
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7.0.1
       - uses: actions/setup-python@v6
         with:
           python-version: '3.14'
@@ -79,14 +82,14 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: bash build.sh boot
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7.0.2
         with:
           name: sheng-24A446-boot
           path: dist/boot/
           if-no-files-found: error
           retention-days: 7
       - if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: boot-diagnostics
           path: src/UniXNU/out/sheng/ipados-27.0.1-24A446/sheng_ipados27/logs/*.log

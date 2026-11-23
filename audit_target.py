@@ -14,8 +14,9 @@ def check_inputs():
     local = [path for path in (CORE / "unixnu.local.toml", BOARD / "local.toml") if path.exists()]
     external = sorted(key for key, value in os.environ.items() if value and
                       ((key.startswith("UNIXNU_") and key not in {"UNIXNU_IPSW_JOBS", "UNIXNU_UNIQUE_CHIP_ID"})
+                       or key.startswith("XNU_")
                        or key in {"SDKROOT", "MACOSX_DEPLOYMENT_TARGET", "NMB_PREBUILT_BRIDGE",
-                                  "QCA_BLUETOOTH_DIR", "ADRENO_PLUGIN_DIR", "ADRENO_TURNIP_DIR"}))
+                                  "QCA_BLUETOOTH_DIR", "ATH12K_WIFI_DIR", "QCOM_IRIS_DIR", "ADRENO_PLUGIN_DIR"}))
     if local or external:
         raise ValueError(f"External target overrides detected: {[*map(str, local), *external]}")
 
@@ -42,6 +43,7 @@ def verify_profile(ctx):
         "device": (ctx.name, "sheng"), "output": (ctx.work, TARGET),
         "profile": (board["os"]["name"], DEVICE["profile"]),
         "architecture": (board["os"]["arch"], "arm64e"),
+        "XNU target": (board["os"].get("target", "ios"), "ios"),
         "defconfig": (ctx.config_name, "sheng_ipados27_defconfig"),
         "kernel fragments": (board["kernel"]["config_fragments"], ["arch:configs/common.config", "os:configs/ipados.config"]),
         "system": ((ipsw["product"], ipsw["device_class"], ipsw["version"], ipsw["build"]),

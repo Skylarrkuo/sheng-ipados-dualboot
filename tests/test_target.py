@@ -1,10 +1,14 @@
 import os
+import re
+import shutil
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
 
 from audit_target import check_inputs, context, verify_profile
+from configure import BOARD
 
 
 class TargetTests(unittest.TestCase):
@@ -31,3 +35,24 @@ class TargetTests(unittest.TestCase):
             with self.subTest(key=key), patch.dict(ctx.board["payload"]["runtime"], {key: value}):
                 with self.assertRaises(ValueError):
                     verify_profile(ctx)
+
+    @unittest.skipUnless(shutil.which("c++"), "C++ preprocessor required")
+    def test_driver_platform_guards(self):
+        for file, names in {
+            "KeyboardProbe.cpp": ["kClamshellLog"],
+            "ShengSleep.cpp": ["kWakeEventSource", "lidArmed", "powerArmed", "counterMs"],
+        }.items():
+            driver = (BOARD / "package" / file).read_text(encoding="utf-8")
+            # Exercise the actual conditional declarations and all their callers
+            # before CI has the XNU private headers used in the full build.
+            source = re.sub(r"^#include .*?$", "", driver, flags=re.M)
+            for desktop in (0, 1):
+                code = subprocess.check_output(["c++", "-E", "-P", "-x", "c++",
+                                                f"-DXNU_TARGET_OS_OSX={desktop}", "-"], input=source, text=True)
+                for name in names:
+                    with self.subTest(file=file, desktop=desktop, name=name):
+                        count = len(re.findall(rf"\b{name}\b", code))
+                        if desktop:
+                            self.assertGreaterEqual(count, 2)
+                        else:
+                            self.assertEqual(count, 0)
